@@ -21,10 +21,6 @@ SkillExchange is a **full-stack JavaScript application** featuring:
 SkillExchange/
 ├── backend/             # Server-side code: APIs, business logic, database models
 ├── frontend/            # Client-side code: user interface, static assets
-├── node_modules/        # Project dependencies (auto-generated)
-├── .gitignore           # Git ignore rules
-├── package.json         # Project metadata and dependencies
-├── package-lock.json    # Lockfile for dependency versions
 └── README.md            # Project documentation
 ```
 
