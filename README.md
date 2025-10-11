@@ -32,15 +32,6 @@ SkillExchange/
 - **frontend/**  
   Contains all client-side code, such as your Reactapp, static assets, and UI-related logic.
 
-- **node_modules/**  
-  Houses all installed dependencies. Automatically generated when running `npm install`.
-
-- **.gitignore**  
-  Specifies files/folders for git to ignore (e.g., `node_modules/`, environment files, etc).
-
-- **package.json & package-lock.json**  
-  Define and lock the project's npm dependencies, scripts, and metadata.
-
 - **README.md**  
   You are reading it! Contains documentation and project information.
 
