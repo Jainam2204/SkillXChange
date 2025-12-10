@@ -1,4 +1,4 @@
-# SkillExchange
+# SkillXChange
 
 SkillExchange is a collaborative platform designed to connect individuals who want to exchange knowledge and skills. Whether you want to learn something new or share your expertise, SkillExchange makes it easy to find a match and grow together.
 
