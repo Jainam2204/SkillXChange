@@ -1,11 +1,14 @@
 const express = require("express");
-const meetingController = require("../controllers/meetingController");
-
+const authMiddleware = require("../middleware/authMiddleware");
+const { createMeeting, getMeeting } = require("../controllers/meetingController");
+const checkBanned = require("../middleware/checkBanned");
 const router = express.Router();
 
-router.post("/create", meetingController.createMeeting);
-router.post("/token", meetingController.generateMeetingToken);
-router.get("/active/:userId", meetingController.getActiveMeeting);
-router.post("/end", meetingController.endMeeting);
+router.post("/", authMiddleware,checkBanned, createMeeting);
+
+router.get("/:id", authMiddleware,checkBanned, getMeeting);
 
 module.exports = router;
+
+
+

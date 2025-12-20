@@ -1,96 +1,151 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import React from 'react';
+import {
+  Box,
+  List,
+  ListItemButton,
+  ListItemAvatar,
+  Avatar,
+  Typography,
+  Divider,
+  IconButton,
+} from '@mui/material';
 
-const BACKEND_URL = "http://localhost:5000";
-
-const UserList = () => {
-  const [users, setUsers] = useState([]);
-  const [error, setError] = useState("");
-  const [loggedInUserId, setLoggedInUserId] = useState("");
-
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setError("User not authenticated");
-      return;
-    }
-
-    const decodedToken = JSON.parse(atob(token.split(".")[1]));
-    const userId = decodedToken.userId;
-    setLoggedInUserId(userId);
-
-    if (!userId) {
-      setError("Invalid user ID");
-      return;
-    }
-
-    const fetchUsers = async () => {
-      try {
-        const response = await fetch(
-          `http://localhost:5000/user/getusers?loggedInUserId=${userId}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch users");
-        }
-
-        const data = await response.json();
-        setUsers(data);
-      } catch (err) {
-        setError("Error fetching users");
-        console.error(err);
-      }
-    };
-
-    fetchUsers();
-  }, []);
-
-  if (error) return <p className="text-red-500 text-center">{error}</p>;
-
+function UserList({ users, selectedUser, onSelectUser, loading, error }) {
   return (
-    <div className="p-4">
-      <h2 className="text-2xl font-bold mb-4">Users</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {users.map((user) => (
-          <div
-            key={user._id}
-            className="p-4 bg-white shadow-md rounded-md relative"
-          >
-            <h3 className="text-lg font-semibold">{user.name}</h3>
-            <p className="text-gray-600">
-              <strong>Email:</strong> {user.email}
-            </p>
-            <p className="text-gray-600">
-              <strong>Skills Have:</strong> {user.skillsHave.join(", ")}
-            </p>
-            <p className="text-gray-600">
-              <strong>Skills Want:</strong> {user.skillsWant.join(", ")}
-            </p>
+    <Box
+      sx={{
+        width: 300,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        bgcolor: '#ffffff',
+        borderRight: '1px solid #e0e0e0',
+        flexShrink: 0,
+      }}
+    >
+      <Box
+        sx={{
+          px: 2,
+          py: 1.5,
+          bgcolor: '#ffffff',
+          borderBottom: '1px solid #e0e0e0',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Typography variant="subtitle1" fontWeight={600} sx={{ color: '#1e293b' }}>
+          Chats
+        </Typography>
+      </Box>
 
-            {user.hasUnreadMessages && (
-              <p className="text-red-500 font-semibold mt-2">
-                New messages available
-              </p>
-            )}
+      {loading ? (
+        <Box
+          flex={1}
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Typography variant="body2" sx={{ color: '#64748b' }}>
+            Loading users...
+          </Typography>
+        </Box>
+      ) : error ? (
+        <Box
+          flex={1}
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Typography variant="body2" color="error">
+            {error}
+          </Typography>
+        </Box>
+      ) : !users || users.length === 0 ? (
+        <Box
+          flex={1}
+          display="flex"
+          flexDirection="column"
+          alignItems="center"
+          justifyContent="center"
+          px={2}
+        >
+          <Typography variant="body2" sx={{ color: '#64748b' }}>
+            No users available
+          </Typography>
+          <Typography variant="caption" sx={{ color: '#94a3b8', mt: 0.5 }}>
+            Register another user to start chatting
+          </Typography>
+        </Box>
+      ) : (
+        <List
+          sx={{
+            width: '100%',
+            flex: 1,
+            overflow: 'auto',
+            py: 0,
+          }}
+        >
+          {users.map((user, index) => {
+            const isSelected = selectedUser?._id === user._id;
 
-            <Link
-              to={`/chat/${user._id}`}
-              className="mt-2 bg-blue-500 text-white px-4 py-2 rounded block text-center"
-            >
-              Chat
-            </Link>
-          </div>
-        ))}
-      </div>
-    </div>
+            return (
+              <React.Fragment key={user._id}>
+                <ListItemButton
+                  onClick={() => onSelectUser(user)}
+                  selected={isSelected}
+                  sx={{
+                    alignItems: 'center',
+                    bgcolor: isSelected ? '#e3f2fd' : '#ffffff',
+                    borderLeft: isSelected ? '4px solid #1976d2' : '4px solid transparent',
+                    '&.Mui-selected:hover': {
+                      bgcolor: '#e3f2fd',
+                    },
+                    '&:hover': {
+                      bgcolor: '#f8fafc',
+                    },
+                    py: 1.5,
+                  }}
+                >
+                  <ListItemAvatar>
+                    <Avatar
+                      sx={{
+                        bgcolor: '#1976d2',
+                        color: '#ffffff',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {user.name?.charAt(0).toUpperCase()}
+                    </Avatar>
+                  </ListItemAvatar>
+
+                  <Box
+                    flex={1}
+                    minWidth={0}
+                    display="flex"
+                    flexDirection="column"
+                  >
+                    <Typography
+                      variant="subtitle2"
+                      noWrap
+                      sx={{
+                        fontWeight: 500,
+                        color: '#1e293b',
+                      }}
+                    >
+                      {user.name}
+                    </Typography>
+                  </Box>
+                </ListItemButton>
+
+                {index < users.length - 1 && <Divider component="li" />}
+              </React.Fragment>
+            );
+          })}
+        </List>
+      )}
+    </Box>
   );
-};
+}
 
 export default UserList;

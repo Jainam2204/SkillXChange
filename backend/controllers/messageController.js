@@ -1,120 +1,132 @@
 const messageService = require("../services/messageService");
+const logger = require("../utils/logger");
 
-let users = {};
+let io = null;
 
-exports.handleConnection = (io, socket) => {
-  console.log("User connected:", socket.id);
+exports.initMessageController = (ioInstance) => {
+  io = ioInstance;
+};
 
-  socket.on("join", async (userId) => {
-    socket.join(userId);
-    users[userId] = socket.id;
-    console.log(`User ${userId} joined their room`);
+exports.getMessages = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId =
+      (req.user && (req.user._id || req.user.id)) || req.userId;
 
-    const unreadMessages = await messageService.getUnreadMessages(userId);
-
-    for (const msg of unreadMessages) {
-      io.to(userId).emit("receiveMessage", msg);
-      await messageService.markMessageAsRead(msg._id);
+    if (!currentUserId) {
+      return res
+        .status(401)
+        .json({ message: "User not authenticated for messages" });
     }
-  });
 
-  socket.on("sendMessage", async ({ sender, receiver, message }) => {
-    if (!sender || !receiver || !message) return;
+    const result = await messageService.getMessagesBetweenUsers(
+      currentUserId,
+      userId
+    );
 
-    const newMessage = await messageService.saveMessage({
-      sender,
-      receiver,
-      message,
-      isRead: users[receiver] ? true : false,
-    });
-
-    io.to(sender).emit("receiveMessage", newMessage);
-    if (users[receiver]) io.to(receiver).emit("receiveMessage", newMessage);
-  });
-
-  socket.on("disconnect", () => {
-    for (const userId in users) {
-      if (users[userId] === socket.id) {
-        delete users[userId];
-        console.log(`User ${userId} disconnected`);
-        break;
-      }
-    }
-  });
+    res.json(result.messages);
+  } catch (error) {
+    logger.error("getMessages error:", { error: error.message, stack: error.stack });
+    res.status(500).json({ message: error.message || "Server error" });
+  }
 };
 
 exports.sendMessage = async (req, res) => {
   try {
-    const { sender, receiver, text } = req.body;
+    const { receiverId, content, type } = req.body;
+    const fileData = req.file || null;
 
-    if (!sender || !receiver || !text) {
-      return res.status(400).json({ message: "All fields are required" });
+    const senderId =
+      (req.user && (req.user._id || req.user.id)) || req.userId;
+
+    if (!senderId) {
+      return res
+        .status(401)
+        .json({ message: "User not authenticated for sending message" });
     }
 
-    const message = await messageService.sendMessage(sender, receiver, text);
-    res.status(201).json({ message: "Message sent", data: message });
-  } catch (error) {
-    console.error("Error sending message:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-}
+    if (!receiverId) {
+      return res.status(400).json({ message: "Receiver ID is required" });
+    }
 
-exports.getUserMessages = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const messages = await messageService.getUserMessages(userId);
-    res.status(200).json({ messages });
-  } catch (error) {
-    console.error("Error fetching user messages:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-}
 
-exports.getChatHistory = async (req, res) => {
-  try {
-    const { user1, user2 } = req.params;
-    const result = await messageService.getChatHistory(user1, user2);
-    res.status(200).json(result);
-  } catch (error) {
-    console.error("Error fetching chat history:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-}
+    if (fileData) {
+      if (fileData.size > 10 * 1024 * 1024) {
+        return res.status(400).json({ message: "File size exceeds 10MB limit" });
+      }
+      logger.info("Uploading file:", { filename: fileData.originalname, size: fileData.size, type: fileData.mimetype });
+    }
 
-exports.markAsRead = async (req, res) => {
-  try {
-    const { receiver, sender } = req.params;
-    await messageService.markMessagesAsRead(receiver, sender);
-    res.status(200).json({ message: "Messages marked as read" });
-  } catch (error) {
-    console.error("Error marking messages as read:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-}
+    const result = await messageService.createMessage(
+      senderId,
+      receiverId,
+      content,
+      type,
+      fileData
+    );
 
-exports.deleteMessage = async (req, res) => {
+    if (io) {
+      io.to(`user:${result.senderId}`).emit("newMessage", result.message);
+      io.to(`user:${result.receiverId}`).emit("newMessage", result.message);
+    }
+
+    res.status(201).json(result.message);
+  } catch (error) {
+    logger.error("sendMessage error:", { error: error.message, stack: error.stack });
+    
+    let statusCode = 500;
+    let errorMessage = "Server error";
+    
+    if (error.message?.includes("not configured") || error.message?.includes("Cloudinary")) {
+      statusCode = 503;
+      errorMessage = "File upload service is not available. Please contact support.";
+    } else if (error.message?.includes("upload failed") || error.message?.includes("upload")) {
+      statusCode = 502;
+      errorMessage = error.message || "File upload failed. Please try again.";
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    res.status(statusCode).json({ 
+      message: errorMessage,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+    });
+  }
+};
+
+exports.downloadFile = async (req, res) => {
   try {
     const { messageId } = req.params;
-    const message = await messageService.deleteMessage(messageId);
+    const currentUserId =
+      (req.user && (req.user._id || req.user.id)) || req.userId;
 
-    if (!message) {
-      return res.status(404).json({ message: "Message not found" });
+    if (!currentUserId) {
+      return res
+        .status(401)
+        .json({ message: "User not authenticated for download" });
     }
 
-    res.status(200).json({ message: "Message deleted" });
-  } catch (error) {
-    console.error("Error deleting message:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-}
+    if (!messageId) {
+      return res.status(400).json({ message: "Message ID is required" });
+    }
 
-exports.deleteConversation = async (req, res) =>{
-  try {
-    const { user1, user2 } = req.params;
-    await messageService.deleteConversation(user1, user2);
-    res.status(200).json({ message: "Conversation deleted" });
+    const fileData = await messageService.downloadFileByMessageId(messageId);
+
+    res.setHeader('Content-Type', fileData.contentType);
+    res.setHeader('Content-Length', fileData.buffer.length);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileData.fileName}"`
+    );
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    res.send(fileData.buffer);
+    logger.info('File download initiated:', { messageId, fileName: fileData.fileName });
   } catch (error) {
-    console.error("Error deleting conversation:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    logger.error('downloadFile error:', { error: error.message, stack: error.stack });
+    res.status(500).json({ message: error.message || "Download failed" });
   }
-}
+};

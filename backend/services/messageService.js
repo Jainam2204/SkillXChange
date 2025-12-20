@@ -1,65 +1,228 @@
 const Message = require("../models/Message");
-const User = require("../models/User");
+const cloudinary = require("../config/cloudinary");
+const streamifier = require("streamifier");
+const fs = require("fs");
+const path = require("path");
+const axios = require('axios');
+const logger = require("../utils/logger");
 
-exports.sendMessage = async (sender, receiver, text) => {
-  const message = new Message({ sender, receiver, text, isRead: false });
-  return await message.save();
-}
+const uploadToLocalStorage = (buffer, filename) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const uploadsDir = path.join(__dirname, '../uploads/chat');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
 
-exports.getUserMessages = async (userId) => {
-  return await Message.find({
-    $or: [{ sender: userId }, { receiver: userId }],
-  }).sort({ createdAt: 1 });
-}
+      const timestamp = Date.now();
+      const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filePath = path.join(uploadsDir, `${timestamp}-${sanitizedFilename}`);
 
-exports.getChatHistory = async (user1, user2) => {
+      fs.writeFileSync(filePath, buffer);
+
+      const baseUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+      const fileUrl = `${baseUrl}/uploads/chat/${timestamp}-${sanitizedFilename}`;
+      
+      logger.info('File saved locally:', { filePath, fileUrl });
+      resolve({
+        secure_url: fileUrl,
+        public_id: `${timestamp}-${sanitizedFilename}`
+      });
+    } catch (error) {
+      logger.error('Local file storage error:', { error: error.message, stack: error.stack });
+      reject(new Error(`Failed to save file locally: ${error.message}`));
+    }
+  });
+};
+
+const uploadBufferToCloudinary = (buffer, filename) => {
+  return new Promise((resolve, reject) => {
+    const isCloudinaryConfigured = 
+      process.env.CLOUDINARY_CLOUD_NAME && 
+      process.env.CLOUDINARY_API_KEY && 
+      process.env.CLOUDINARY_SECRET_KEY;
+
+    if (!isCloudinaryConfigured) {
+      logger.info('Cloudinary not configured, using local file storage');
+      return uploadToLocalStorage(buffer, filename)
+        .then(resolve)
+        .catch(reject);
+    }
+
+    const isPDF = filename.toLowerCase().endsWith('.pdf');
+    const isImage = /\.(jpg|jpeg|png|gif)$/i.test(filename);
+    
+    const uploadOptions = {
+      folder: process.env.CLOUDINARY_FOLDER || "chat_uploads",
+      public_id: `${Date.now()}-${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`,
+      resource_type: isPDF ? "raw" : isImage ? "image" : "auto",
+    };
+
+    if (isPDF) {
+      uploadOptions.resource_type = "raw";
+    }
+
+    logger.info('Uploading to Cloudinary:', { filename, options: uploadOptions });
+
+    try {
+      const stream = cloudinary.uploader.upload_stream(
+        uploadOptions,
+        (error, result) => {
+          if (error) {
+            logger.error('Cloudinary upload error:', {
+              message: error.message,
+              http_code: error.http_code,
+              name: error.name,
+              stack: error.stack
+            });
+            return reject(new Error(`File upload failed: ${error.message || 'Unknown error'}`));
+          }
+          if (!result || !result.secure_url) {
+            logger.error('Cloudinary upload returned invalid result:', { result });
+            return reject(new Error('File upload failed: Invalid response from upload service'));
+          }
+          logger.info('File uploaded successfully:', { url: result.secure_url });
+
+          axios.head(result.secure_url, { timeout: 5000 })
+            .then((resp) => {
+              logger.debug('Uploaded file headers:', {
+                url: result.secure_url,
+                status: resp.status,
+                contentType: resp.headers['content-type'],
+                contentLength: resp.headers['content-length'],
+              });
+              resolve(result);
+            })
+            .catch((headErr) => {
+              logger.warn('Could not fetch uploaded file headers:', { error: headErr.message });
+              resolve(result);
+            });
+        }
+      );
+
+      streamifier.createReadStream(buffer).pipe(stream);
+    } catch (err) {
+      logger.error('Error creating upload stream:', { error: err.message, stack: err.stack });
+      reject(new Error(`File upload failed: ${err.message}`));
+    }
+  });
+};
+
+exports.getMessagesBetweenUsers = async (currentUserId, otherUserId) => {
   const messages = await Message.find({
     $or: [
-      { sender: user1, receiver: user2 },
-      { sender: user2, receiver: user1 },
+      { sender: currentUserId, receiver: otherUserId },
+      { sender: otherUserId, receiver: currentUserId },
     ],
-  }).sort({ createdAt: 1 });
+  })
+    .populate("sender", "name email")
+    .populate("receiver", "name email")
+    .sort({ createdAt: 1 });
 
-  const selectedUser = await User.findById(user2, "name");
-
-  return { messages, selectedUserName: selectedUser?.name || "Unknown" };
-}
-
-exports.markMessagesAsRead = async (receiver, sender) => {
-  return await Message.updateMany(
-    { receiver, sender, isRead: false },
-    { $set: { isRead: true } }
-  );
-}
-
-exports.deleteMessage = async (messageId) => {
-  return await Message.findByIdAndDelete(messageId);
-}
-
-exports.deleteConversation = async (user1, user2) => {
-  return await Message.deleteMany({
-    $or: [
-      { sender: user1, receiver: user2 },
-      { sender: user2, receiver: user1 },
-    ],
-  });
-}
-
-exports.saveMessage = async ({ sender, receiver, message, isRead }) => {
-  const newMessage = new Message({
-    sender,
-    receiver,
-    message,
-    isRead,
-    timestamp: new Date(),
-  });
-  return await newMessage.save();
+  return {
+    messages,
+    otherUserId,
+    currentUserId,
+  };
 };
 
-exports.getUnreadMessages = async (userId) => {
-  return await Message.find({ receiver: userId, isRead: false });
+exports.createMessage = async (
+  senderId,
+  receiverId,
+  content,
+  type,
+  fileData = null
+) => {
+  let messageData = {
+    sender: senderId,
+    receiver: receiverId,
+    type: fileData ? "file" : "text",
+  };
+
+  if (fileData) {
+    try {
+      logger.info('Starting file upload for:', { filename: fileData.originalname });
+      const upload = await uploadBufferToCloudinary(
+        fileData.buffer,
+        fileData.originalname
+      );
+
+      if (!upload || !upload.secure_url) {
+        throw new Error('Upload failed: No URL returned');
+      }
+
+      messageData.fileUrl = upload.secure_url;
+      messageData.fileName = fileData.originalname;
+      messageData.content = content || fileData.originalname;
+      logger.info('File upload successful:', { url: upload.secure_url });
+    } catch (uploadError) {
+      logger.error('File upload error in createMessage:', { error: uploadError.message, stack: uploadError.stack });
+      throw new Error(`Failed to upload file: ${uploadError.message}`);
+    }
+  } else {
+    messageData.content = content || "";
+  }
+
+  const message = new Message(messageData);
+  await message.save();
+
+  const populatedMessage = await Message.findById(message._id)
+    .populate("sender", "name email")
+    .populate("receiver", "name email")
+    .lean();
+
+  return {
+    message: populatedMessage,
+    senderId,
+    receiverId,
+  };
 };
 
-exports.markMessageAsRead = async (messageId) => {
-  return await Message.findByIdAndUpdate(messageId, { isRead: true });
+exports.downloadFileByMessageId = async (messageId) => {
+  try {
+    const message = await Message.findById(messageId);
+    if (!message || !message.fileUrl) {
+      throw new Error('Message or file not found');
+    }
+
+    const response = await axios.get(message.fileUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+    });
+
+    const fileBuffer = response.data;
+    const fileName = message.fileName || 'download';
+    const isPDF = fileName.toLowerCase().endsWith('.pdf');
+    
+    let contentType = 'application/octet-stream';
+    if (isPDF) {
+      contentType = 'application/pdf';
+    } else if (/\.(jpg|jpeg)$/i.test(fileName)) {
+      contentType = 'image/jpeg';
+    } else if (/\.png$/i.test(fileName)) {
+      contentType = 'image/png';
+    } else if (/\.gif$/i.test(fileName)) {
+      contentType = 'image/gif';
+    } else if (/\.(doc|docx)$/i.test(fileName)) {
+      contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (/\.txt$/i.test(fileName)) {
+      contentType = 'text/plain';
+    }
+
+    logger.info('Fetched file from Cloudinary:', {
+      messageId,
+      fileName,
+      contentType,
+      size: fileBuffer.length,
+    });
+
+    return {
+      buffer: fileBuffer,
+      fileName,
+      contentType,
+    };
+  } catch (error) {
+    logger.error('Error downloading file:', { error: error.message, stack: error.stack });
+    throw new Error(`Failed to download file: ${error.message}`);
+  }
 };

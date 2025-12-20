@@ -1,36 +1,50 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema(
   {
-    sender: { 
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User", 
-        required: true
+    sender: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
     },
-    receiver: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: "User", 
-        required: true 
+    receiver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
     },
-    message: { 
-        type: String, 
+    content: {
+      type: String,
+      required: function () {
+        return this.type === 'text';
+      },
+      default: null,
     },
-    fileUrl: { 
-        type: String
+
+    type: {
+      type: String,
+      enum: ['text', 'file'],
+      default: 'text',
     },
-    fileName: {  
-        type: String
+
+    fileUrl: {
+      type: String,
+      default: null,
     },
-    isRead: { 
-        type: Boolean, 
-        default: false 
+    fileName: {
+      type: String,
+      default: null,
     },
-    timestamp: { 
-        type: Date, 
-        default: Date.now 
-    }
+    read: {
+      type: Boolean,
+      default: false,
+    },
   },
-  { timestamps: true } 
+  {
+    timestamps: true,
+  }
 );
 
-module.exports = mongoose.model("MessageTemp", messageSchema);
+messageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
+messageSchema.index({ receiver: 1, read: 1 });
+
+module.exports = mongoose.model('Message', messageSchema);

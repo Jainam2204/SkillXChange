@@ -1,50 +1,71 @@
-const meetingService = require("../services/meetingService");
+const { customAlphabet } = require("nanoid");
+const Meeting = require("../models/Meeting");
+
+const generateMeetingId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 10);
 
 exports.createMeeting = async (req, res) => {
   try {
-    const { creatorId, partnerId, roomName } = req.body;
-    const meeting = await meetingService.createMeeting(creatorId, partnerId, roomName);
-    res.status(201).json(meeting);
-  } catch (error) {
-    console.error("Error creating meeting:", error.message);
-    res.status(500).json({ message: "Error creating meeting" });
-  }
-}
+    const hostId = req.user._id;
+    const { title = "", inviteeId } = req.body || {};
 
-exports.generateMeetingToken = (req, res) => {
-  try {
-    const { userId, roomName } = req.body;
-    const token = meetingService.generateMeetingToken(userId, roomName);
-    res.json({ token });
-  } catch (err) {
-    console.error("Error generating token:", err.message);
-    res.status(500).json({ error: "Failed to generate token" });
-  }
-}
+    let meetingId = generateMeetingId();
 
-exports.getActiveMeeting = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const meeting = await meetingService.getActiveMeeting(userId);
-
-    if (!meeting) {
-      return res.status(404).json({ message: "No active meeting" });
+    for (let i = 0; i < 3; i++) {
+      const existing = await Meeting.findOne({ meetingId });
+      if (!existing) break;
+      meetingId = generateMeetingId();
     }
 
-    res.status(200).json(meeting);
-  } catch (err) {
-    console.error("Error retrieving meeting:", err.message);
-    res.status(500).json({ message: "Error retrieving meeting" });
-  }
-}
+    const meeting = await Meeting.create({
+      meetingId,
+      hostId,
+      title,
+      participants: [hostId],
+    });
 
-exports.endMeeting = async (req, res) => {
-  try {
-    const { roomName } = req.body;
-    await meetingService.endMeeting(roomName);
-    res.status(200).json({ message: "Meeting ended" });
+    if (inviteeId && global.__emitToUser) {
+      try {
+        const User = require("../models/User");
+        const hostUser = await User.findById(hostId);
+        const hostName = hostUser?.name || "Unknown";
+
+        global.__emitToUser(inviteeId, "meet-started", {
+          meetingId: meeting.meetingId,
+          connectionId: String(hostId),
+          connectionName: hostName,
+          title: meeting.title || "Meeting",
+          createdAt: meeting.createdAt,
+        });
+      } catch (err) {
+        console.error("Error emitting meet-started event:", err.message);
+      }
+    }
+
+    return res.status(201).json({
+      meetingId: meeting.meetingId,
+      title: meeting.title,
+      createdAt: meeting.createdAt,
+    });
   } catch (error) {
-    console.error("Error ending meeting:", error.message);
-    res.status(500).json({ message: "Error ending meeting" });
+    return res.status(500).json({ message: error.message || "Failed to create meeting" });
   }
-}
+};
+
+exports.getMeeting = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const meeting = await Meeting.findOne({ meetingId: id });
+    if (!meeting) {
+      return res.status(404).json({ message: "Meeting not found" });
+    }
+    return res.json({
+      meetingId: meeting.meetingId,
+      title: meeting.title,
+      hostId: meeting.hostId,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || "Failed to fetch meeting" });
+  }
+};
+
+

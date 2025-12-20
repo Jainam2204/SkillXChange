@@ -1,170 +1,342 @@
-import axios from "axios";
-import { Bell, Search } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import React, { useState } from "react";
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Button,
+  IconButton,
+  Box,
+  InputBase,
+  Drawer,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  Divider,
+  alpha,
+  Badge,
+  Popover,
+  Card,
+  CardContent,
+} from "@mui/material";
+import MenuIcon from "@mui/icons-material/Menu";
+import SearchIcon from "@mui/icons-material/Search";
+import AccountCircleIcon from "@mui/icons-material/AccountCircle";
+import LogoutIcon from "@mui/icons-material/Logout";
+import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
+import CloseIcon from "@mui/icons-material/Close";
+import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Input } from "./ui/input";
+import { toast } from "react-toastify";
+import { useNotifications } from "../context/NotificationContext";
+import api from "../utils/api";
 
-export default function Navbar() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [search, setSearch] = useState("");
+const Navbar = () => {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notificationAnchorEl, setNotificationAnchorEl] = useState(null);
   const navigate = useNavigate();
-  const bellRef = useRef();
+  const navItems = ["Dashboard", "Connections", "Chat", "Subscription", "Profile"];
+  const { meetingNotifications, removeMeetingNotification } = useNotifications();
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    setIsLoggedIn(!!token);
+  const toggleDrawer = (open) => () => {
+    setDrawerOpen(open);
+  };
 
-    if (token) {
-      fetchNotifications();
-      const interval = setInterval(fetchNotifications, 5000);
-      return () => clearInterval(interval);
-    }
-  }, []);
+  const handleNotificationClick = (event) => {
+    setNotificationAnchorEl(event.currentTarget);
+  };
 
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (bellRef.current && !bellRef.current.contains(event.target)) {
-        setShowDropdown(false);
-      }
-    }
-    if (showDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showDropdown]);
+  const handleNotificationClose = () => {
+    setNotificationAnchorEl(null);
+  };
 
-  const fetchNotifications = async () => {
+  const handleJoinMeet = (meetingId) => {
+    removeMeetingNotification(meetingId);
+    handleNotificationClose();
+    navigate(`/meet/${meetingId}`);
+  };
+
+  const handleDismissNotification = (meetingId) => {
+    removeMeetingNotification(meetingId);
+  };
+
+  const handleLogout = async () => {
     try {
-      const user = JSON.parse(localStorage.getItem("user"));
-      if (!user) return;
-      const response = await axios.get(
-        `http://localhost:5000/user/notifications/${user._id}`
-      );
-      setNotifications(response.data.notifications);
-    } catch (error) {
-      console.error("Error in fetching notifications : ", error);
-    }
-  };
+      await api.post("/auth/logout");
 
-  const handleNotificationClick = async (notification) => {
-    try {
-      await axios.post("http://localhost:5000/user/notifications/read", {
-        notificationId: notification._id,
-      });
-      navigate(`/dashboard/profile/${notification.senderId}`);
-      setNotifications((prev) =>
-        prev.filter((n) => n._id !== notification._id)
-      );
-      setShowDropdown(false);
-    } catch (error) {
-      console.error("Mark as read notification failed : ", error);
-    }
-  };
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
 
-  const handleAuth = () => {
-    if (isLoggedIn) {
-      localStorage.clear();
-      setIsLoggedIn(false);
+      toast.success("Logged out successfully!");
       navigate("/login");
-    } else {
-      navigate("/login");
+    } catch (err) {
+      console.error("Logout failed:", err);
+      toast.error("Logout failed");
     }
   };
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (search.trim()) {
-      navigate(`/search?q=${encodeURIComponent(search.trim())}`);
-      setSearch("");
-    }
-  };
+  const notificationCount = Object.keys(meetingNotifications).length;
+  const open = Boolean(notificationAnchorEl);
 
   return (
-    <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur shadow-md px-4 py-2 flex items-center justify-between">
-      <div
-        className="text-2xl font-extrabold text-blue-700 cursor-pointer tracking-tight"
-        onClick={() => navigate("/")}
+    <>
+      <AppBar
+        position="fixed"
+        elevation={1}
+        sx={{
+          backgroundColor: "#ffffff",
+          color: "#0f1724",
+          boxShadow: "0px 4px 16px rgba(16,24,40,0.06)",
+          backdropFilter: "blur(6px)",
+        }}
       >
-        SkillXChange
-      </div>
-
-      {isLoggedIn && (
-        <form
-          onSubmit={handleSearch}
-          className="hidden md:flex items-center bg-gray-100 rounded-full px-3 py-1 shadow-inner transition w-72"
+        <Toolbar
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            px: { xs: 2, md: 4 },
+          }}
         >
-          <Search className="w-5 h-5 text-gray-400 mr-2" />
-          <input
-            type="text"
-            placeholder="Search users, skills..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-transparent outline-none w-full text-gray-700"
-          />
-        </form>
-      )}
-
-      <div className="flex items-center gap-4">
-        {isLoggedIn && (
-          <div className="relative" ref={bellRef}>
-            <button
-              className="relative rounded-full p-2 hover:bg-blue-100 transition"
-              onClick={() => setShowDropdown((v) => !v)}
-              type="button"
-              aria-label="Show notifications"
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <IconButton
+              sx={{ color: "text.primary", display: { xs: "flex", md: "none" } }}
+              onClick={toggleDrawer(true)}
             >
-              <Bell className="w-6 h-6 text-blue-600" />
-              {notifications.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow">
-                  {notifications.length}
-                </span>
-              )}
-            </button>
+              <MenuIcon />
+            </IconButton>
 
-            {showDropdown && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden animate-fade-in z-50">
-                <div className="p-3 border-b font-semibold text-blue-700 bg-blue-50">
-                  Notifications
-                </div>
-                <div className="max-h-72 overflow-y-auto">
-                  {notifications.length === 0 ? (
-                    <div className="p-4 text-gray-400 text-center">
-                      No new notifications
-                    </div>
-                  ) : (
-                    notifications.map((notification) => (
-                      <div
-                        key={notification._id}
-                        className="px-4 py-3 border-b last:border-b-0 cursor-pointer hover:bg-blue-50 transition"
-                        onClick={() => handleNotificationClick(notification)}
-                      >
-                        <div className="font-medium text-gray-800">
-                          {notification.senderName}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {notification.senderEmail}
-                        </div>
-                        <div className="text-sm text-gray-600 mt-1">
-                          {notification.message}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+            <motion.div whileHover={{ scale: 1.02 }}>
+              <Typography
+                variant="h6"
+                component="a"
+                href="/dashboard"
+                sx={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#0f1724",
+                  fontSize: "1.25rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.3,
+                }}
+              >
+                <Box component="span" sx={{ color: "#0B75C9", fontWeight: 800 }}>
+                  Skill
+                </Box>
+                <Box component="span" sx={{ color: "#0f1724" }}>
+                  XChange
+                </Box>
+              </Typography>
+            </motion.div>
+          </Box>
 
-        <button
-          onClick={handleAuth}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-full font-semibold shadow transition"
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Box sx={{ display: { xs: "none", md: "flex" }, gap: 0.5 }}>
+              {navItems.map((item) => (
+                <motion.div key={item} whileHover={{ y: -2 }}>
+                  <Button
+                    href={`/${item.toLowerCase()}`}
+                    sx={{
+                      color: "text.primary",
+                      fontWeight: 600,
+                      textTransform: "none",
+                      borderRadius: 2,
+                      "&:hover": {
+                        backgroundColor: alpha("#0B75C9", 0.06),
+                        color: "#0B75C9",
+                      },
+                    }}
+                  >
+                    {item}
+                  </Button>
+                </motion.div>
+              ))}
+            </Box>
+
+            <IconButton sx={{ color: "#0B75C9" }} onClick={handleNotificationClick}>
+              <Badge badgeContent={notificationCount} color="primary">
+                <NotificationsActiveIcon />
+              </Badge>
+            </IconButton>
+
+            <Box sx={{ display: { xs: "none", md: "block" } }}>
+              <motion.div whileHover={{ scale: 1.02 }}>
+                <Button
+                  onClick={handleLogout}
+                  startIcon={<LogoutIcon />}
+                  sx={{
+                    color: "#0B75C9",
+                    backgroundColor: alpha("#0B75C9", 0.06),
+                    fontWeight: 700,
+                    borderRadius: "18px",
+                    textTransform: "none",
+                    px: 2.5,
+                    py: 0.7,
+                    border: `1px solid ${alpha("#0B75C9", 0.12)}`,
+                    "&:hover": {
+                      backgroundColor: alpha("#0B75C9", 0.1),
+                    },
+                  }}
+                >
+                  Logout
+                </Button>
+              </motion.div>
+            </Box>
+          </Box>
+        </Toolbar>
+      </AppBar>
+
+      <Drawer anchor="left" open={drawerOpen} onClose={toggleDrawer(false)}>
+        <Box
+          sx={{
+            width: 260,
+            backgroundColor: "#ffffff",
+            height: "100%",
+            color: "#0f1724",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            p: 2,
+          }}
         >
-          {isLoggedIn ? "Logout" : "Login"}
-        </button>
-      </div>
-    </nav>
+          <Box>
+            <Typography
+              variant="h6"
+              sx={{
+                textAlign: "center",
+                fontWeight: 800,
+                mt: 1,
+                mb: 1,
+                color: "#0f1724",
+              }}
+            >
+              Menu
+            </Typography>
+            <List>
+              {navItems.map((item) => (
+                <ListItem key={item} disablePadding>
+                  <ListItemButton
+                    component="a"
+                    href={`/${item.toLowerCase()}`}
+                    sx={{
+                      borderRadius: 1,
+                      mb: 0.5,
+                      "&:hover": {
+                        backgroundColor: alpha("#0B75C9", 0.06),
+                        color: "#0B75C9",
+                      },
+                    }}
+                  >
+                    <ListItemText primary={item} primaryTypographyProps={{ fontWeight: 600 }} />
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+
+          {/* Drawer Logout */}
+          <Box sx={{ mb: 2, textAlign: "center" }}>
+            <Divider sx={{ mb: 1 }} />
+            <Button
+              onClick={handleLogout}
+              startIcon={<LogoutIcon />}
+              sx={{
+                color: "#0B75C9",
+                backgroundColor: alpha("#0B75C9", 0.08),
+                fontWeight: 700,
+                borderRadius: "18px",
+                textTransform: "none",
+                px: 3,
+                py: 0.8,
+                "&:hover": {
+                  backgroundColor: alpha("#0B75C9", 0.12),
+                },
+              }}
+            >
+              Logout
+            </Button>
+          </Box>
+        </Box>
+      </Drawer>
+
+      {/* Notification Popover */}
+      <Popover
+        open={open}
+        anchorEl={notificationAnchorEl}
+        onClose={handleNotificationClose}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+      >
+        <Box sx={{ width: 360, maxHeight: 420, overflowY: "auto", p: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+            Meeting Invitations
+          </Typography>
+
+          {notificationCount === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No pending meeting invitations
+            </Typography>
+          ) : (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+              {Object.entries(meetingNotifications).map(([meetingId, notif]) => (
+                <Card
+                  key={meetingId}
+                  elevation={1}
+                  sx={{
+                    borderRadius: 2,
+                    border: `1px solid ${alpha("#0B75C9", 0.12)}`,
+                    backgroundColor: "#ffffff",
+                  }}
+                >
+                  <CardContent sx={{ pb: 1.25 }}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                        📹 {notif.connectionName}
+                      </Typography>
+
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDismissNotification(meetingId)}
+                        sx={{
+                          color: "text.secondary",
+                          padding: 0,
+                          "&:hover": { opacity: 0.8 },
+                        }}
+                      >
+                        <CloseIcon sx={{ fontSize: 18 }} />
+                      </IconButton>
+                    </Box>
+
+                    <Typography variant="body2" sx={{ mb: 1.25, color: "text.secondary" }}>
+                      started a meeting with you
+                    </Typography>
+
+                    <Button
+                      variant="contained"
+                      size="small"
+                      fullWidth
+                      onClick={() => handleJoinMeet(meetingId)}
+                      sx={{
+                        backgroundColor: "#0B75C9",
+                        color: "#fff",
+                        fontWeight: 700,
+                        "&:hover": { backgroundColor: "#0962a8" },
+                      }}
+                    >
+                      Join Meet
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </Box>
+          )}
+        </Box>
+      </Popover>
+
+      <Box sx={{ height: { xs: 64, md: 72 } }} />
+    </>
   );
-}
+};
+
+export default Navbar;

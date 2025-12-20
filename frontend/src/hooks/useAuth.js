@@ -1,54 +1,35 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../utils/api"; // ✅ use cookie-based api
 
-export default function useAuth() {
+const useAuth = () => {
   const [user, setUser] = useState(null);
-  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchUser = async () => {
-      const storedUser = localStorage.getItem("user");
-      const token = localStorage.getItem("token");
-
-      console.log("Stored token:", token);
-      if (!storedUser) {
-        navigate("/login");
-        return;
-      }
-
       try {
-        const parsedUser = JSON.parse(storedUser);
+        // ✅ Cookie is sent automatically
+        const res = await api.get("/auth/me");
 
-        const res = await axios.get(`http://localhost:5000/user/${parsedUser._id}`);
-        const freshUser = res.data;
+        setUser(res.data);
 
-        if (freshUser.isBanned) {
-          localStorage.removeItem("user");
-          navigate("/login");
-        } else {
-          localStorage.setItem("user", JSON.stringify(freshUser));
-          setUser(freshUser);
-          
-        }
+        // optional: for UI persistence
+        localStorage.setItem("user", JSON.stringify(res.data));
       } catch (err) {
-        console.error("Error fetching user:", err);
+        console.error("Auth check failed:", err);
+
+        // Clear UI state only (no token exists anymore)
         localStorage.removeItem("user");
-        navigate("/login");
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
     };
 
     fetchUser();
-    const interval = setInterval(fetchUser, 5 * 60 * 1000);
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [navigate]);
+  return { user, loading };
+};
 
-  useEffect(() => {
-    if (user) {
-      console.log("User fetched:", user?.isBanned);
-    }
-  }, [user]);
-
-  return user;
-}
+export default useAuth;
